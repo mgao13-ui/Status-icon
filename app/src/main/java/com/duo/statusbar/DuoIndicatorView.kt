@@ -1,6 +1,7 @@
 package com.duo.statusbar
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -26,99 +27,111 @@ class DuoIndicatorView @JvmOverloads constructor(
     var cellLevel: Int = 4
         set(value) { field = value; invalidate() }
 
-    // 提高对比度：激活白色，未激活半透明白加深至 50%，增加微弱黑阴影防止浅色背景隐形
-    private val activeColor = Color.WHITE
-    private val inactiveColor = Color.parseColor("#80FFFFFF")
-    private val shadowColor = Color.parseColor("#66000000")
+    // 颜色动态适配深色/浅色模式
+    private var activeColor = Color.BLACK
+    private var inactiveColor = Color.parseColor("#33000000")
 
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
-        color = activeColor
     }
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = activeColor
     }
 
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
-        color = inactiveColor
     }
 
     init {
-        setLayerType(LAYER_TYPE_SOFTWARE, null)
-        strokePaint.setShadowLayer(2.5f, 0f, 1f, shadowColor)
-        fillPaint.setShadowLayer(2.5f, 0f, 1f, shadowColor)
+        updateColorsForTheme(resources.configuration)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateColorsForTheme(newConfig)
+        invalidate()
+    }
+
+    private fun updateColorsForTheme(config: Configuration) {
+        val currentNightMode = config.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (currentNightMode == Configuration.UI_MODE_NIGHT_YES) {
+            // 深色背景：亮白色
+            activeColor = Color.WHITE
+            inactiveColor = Color.parseColor("#44FFFFFF")
+        } else {
+            // 浅色背景：深石墨黑
+            activeColor = Color.parseColor("#2C2C2E")
+            inactiveColor = Color.parseColor("#332C2C2E")
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val density = resources.displayMetrics.density
-        val desiredWidth = (84 * density).toInt()
-        val desiredHeight = (24 * density).toInt()
+        val size = (24 * density).toInt()
         setMeasuredDimension(
-            resolveSize(desiredWidth, widthMeasureSpec),
-            resolveSize(desiredHeight, heightMeasureSpec)
+            resolveSize(size, widthMeasureSpec),
+            resolveSize(size, heightMeasureSpec)
         )
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val density = resources.displayMetrics.density
+        val w = width.toFloat()
         val h = height.toFloat()
-        val centerY = h / 2f
+        val cx = w / 2f
+        val cy = h / 2f
 
-        // 1. Wi-Fi 图标（最左侧，中心 x = 16dp）
-        val wifiCenterX = 16f * density
-        val wifiArcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeWidth = 2.2f * density
-            setShadowLayer(2.5f, 0f, 1f, shadowColor)
-        }
-        for (i in 0..2) {
-            val r = (4f + i * 3.5f) * density
-            val rect = RectF(wifiCenterX - r, centerY + 4f * density - r, wifiCenterX + r, centerY + 4f * density + r)
-            wifiArcPaint.color = if (wifiLevel >= (i + 1)) activeColor else inactiveColor
-            canvas.drawArc(rect, 225f, 90f, false, wifiArcPaint)
-        }
-        fillPaint.color = if (wifiLevel > 0) activeColor else inactiveColor
-        canvas.drawCircle(wifiCenterX, centerY + 4.5f * density, 1.4f * density, fillPaint)
-
-        // 2. 信号强度点（中间，中心 x = 44dp）
-        val cellCenterX = 44f * density
-        val dotRadius = 1.9f * density
-        val dotGap = 5.5f * density
-        for (i in 0 until 4) {
-            val cx = cellCenterX - (1.5f * dotGap) + (i * dotGap)
-            fillPaint.color = if (cellLevel > i) activeColor else inactiveColor
-            canvas.drawCircle(cx, centerY, dotRadius, fillPaint)
-        }
-
-        // 3. 电池指示环（最右侧，中心 x = 70dp）
-        val batCenterX = 70f * density
-        val batRadius = 8f * density
-        val strokeW = 2.5f * density
+        // 1. 电池：最外圈指示环
+        val strokeW = 2.2f * density
+        val batRadius = (Math.min(w, h) / 2f) - strokeW
 
         bgPaint.strokeWidth = strokeW
-        canvas.drawCircle(batCenterX, centerY, batRadius, bgPaint)
+        bgPaint.color = inactiveColor
+        canvas.drawCircle(cx, cy, batRadius, bgPaint)
 
         strokePaint.strokeWidth = strokeW
         strokePaint.color = when {
-            isCharging -> Color.parseColor("#00E676")
-            batteryLevel <= 20 -> Color.parseColor("#FF5252")
+            isCharging -> Color.parseColor("#00C853")
+            batteryLevel <= 20 -> Color.parseColor("#D50000")
             else -> activeColor
         }
 
         val sweepAngle = (batteryLevel / 100f) * 360f
-        val batRect = RectF(batCenterX - batRadius, centerY - batRadius, batCenterX + batRadius, centerY + batRadius)
+        val batRect = RectF(cx - batRadius, cy - batRadius, cx + batRadius, cy + batRadius)
         canvas.drawArc(batRect, -90f, sweepAngle, false, strokePaint)
 
+        // 2. Wi-Fi：内圈上半部分（双层弧线）
+        val wifiArcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = 1.5f * density
+        }
+        val wifiCenterY = cy + 1.2f * density
+        for (i in 0..1) {
+            val r = (3.0f + i * 2.6f) * density
+            val rect = RectF(cx - r, wifiCenterY - r, cx + r, wifiCenterY + r)
+            wifiArcPaint.color = if (wifiLevel >= (i + 2)) activeColor else inactiveColor
+            canvas.drawArc(rect, 225f, 90f, false, wifiArcPaint)
+        }
+
+        // 3. 蜂窝信号：内圈下半部分（3 个横向排布的圆点）
+        val dotRadius = 1.3f * density
+        val dotGap = 3.6f * density
+        val dotY = cy + 4.8f * density
+        for (i in 0 until 3) {
+            val dotX = cx - dotGap + (i * dotGap)
+            fillPaint.color = if (cellLevel > i) activeColor else inactiveColor
+            canvas.drawCircle(dotX, dotY, dotRadius, fillPaint)
+        }
+
+        // 4. 充电状态：居中充电小圆点
         if (isCharging) {
-            fillPaint.color = Color.parseColor("#00E676")
-            canvas.drawCircle(batCenterX, centerY, 2.5f * density, fillPaint)
+            fillPaint.color = Color.parseColor("#00C853")
+            canvas.drawCircle(cx, cy - 1.2f * density, 1.5f * density, fillPaint)
         }
     }
 }
